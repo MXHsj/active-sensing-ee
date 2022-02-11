@@ -28,8 +28,8 @@ def rotationMatrixToEulerAngles(R):
     y = math.atan2(-R[2, 0], sy)
     z = 0
   # limit angle range
-  # x = x + 2*math.pi if x < 0 else x
-  # x = x - 2*math.pi if x >= 2*math.pi else x
+  x = x + 2*math.pi if x < 0 else x
+  x = x - 2*math.pi if x >= 2*math.pi else x
   # y = y + 2*math.pi if y < 0 else y
   # y = y - 2*math.pi if y >= 2*math.pi else y
   return np.array([x, y, z])
@@ -39,20 +39,15 @@ class FrankaMotion():
   T_O_ee = None
   franka_state_msg = Float64MultiArray()
   vel_msg = TwistStamped()
-  vel_msg.twist.linear.x = 0.0
-  vel_msg.twist.linear.y = 0.0
-  vel_msg.twist.linear.z = 0.0
-  vel_msg.twist.angular.x = 0.0
-  vel_msg.twist.angular.y = 0.0
-  vel_msg.twist.angular.z = 0.0
+  vel_msg_old = TwistStamped()
   sensors = []
   normal_vec = []
   max_range = 250.0
 
   def __init__(self, pub_rate=800):
     rospy.init_node('scan_w_acoustic_ee', anonymous=True)
-    rospy.Subscriber('ch101/normal', Float64MultiArray, self.ch101_norm_cb)
-    rospy.Subscriber('ch101/distance', Float64MultiArray, self.ch101_dist_cb)
+    rospy.Subscriber('VL53L0X/normal', Float64MultiArray, self.VL53L0X_norm_cb)
+    rospy.Subscriber('VL53L0X/distance', Float64MultiArray, self.VL53L0X_dist_cb)
     rospy.Subscriber('franka_state_controller/franka_states', FrankaState, self.franka_ee_cb)
     self.vel_pub = rospy.Publisher('arm/cartesian/velocity', TwistStamped, queue_size=1)
     self.rate = rospy.Rate(pub_rate)
@@ -96,29 +91,49 @@ class FrankaMotion():
       self.vel_pub.publish(self.vel_msg)
       self.rate.sleep()
 
-  def keep_vertical_test(self):
-    # use normal vector
-    kp = 0.01
+  def keep_vertical_using_normal(self):
+    kp = [0.5, 0.5, 0.2]
+    dead_zone = [0.0, 0.0, 0.0]
     while not rospy.is_shutdown():
-      T_O_ee_d = copy.deepcopy(self.T_O_ee)
-      T_O_ee_d[:3, 2] = self.normal_vec
-      # TODO: fix another DoF
-      # rpy = rotationMatrixToEulerAngles(self.T_O_ee[:3, :3])
-      # rpy_d = rotationMatrixToEulerAngles(T_O_ee_d[:3, :3])
-      # rot_err = rpy_d - rpy
-      # print('rotx:{:.2f}\trotx_d:{:.2f}\trotx_err:{:.2f}'.format(rpy[0], rpy_d[0], rot_err[0]))
-      # print('T:\n', self.T_O_ee, '\nT_d:\n', T_O_ee_d)
-      # self.vel_msg.twist.angular.x = kp*(-rot_err[0])
-      # self.vel_msg.twist.angular.y = kp*(rot_err[1])
-      # self.vel_pub.publish(self.vel_msg)
-      # self.rate.sleep()
+      Vx = self.T_O_ee[:3, 0]
+      Vz = self.normal_vec
+      Vy = np.cross(Vz, Vx)
+      rpy_current = rotationMatrixToEulerAngles(self.T_O_ee[:3, :3])
+      rpy_desired = rotationMatrixToEulerAngles(np.array([Vx, Vy, Vz]))
+      rpy_desired[-1] = -1.57
+      # print(rpy_desired)
+      # print(rpy_current)
+      rot_err = rpy_desired - rpy_current
+      # proportional + low-pass; x,y,z are with respect to eef frame!
+      w = 3/8
+      if abs(rot_err[0]) >= dead_zone[0]:
+        vel_ang_x = w*kp[0]*(rot_err[1]) + (1-w)*self.vel_msg_old.twist.angular.x
+      else:
+        vel_ang_x = 0
+      if abs(rot_err[1]) >= dead_zone[1]:
+        vel_ang_y = w*kp[1]*(-rot_err[0]) + (1-w)*self.vel_msg_old.twist.angular.y
+      else:
+        vel_ang_y = 0
+      if abs(rot_err[2]) >= dead_zone[2]:
+        vel_ang_z = w*kp[2]*(rot_err[2]) + (1-w)*self.vel_msg_old.twist.angular.z
+      else:
+        vel_ang_z = 0
+      print('rotx_err:{:.2f}\troty_err:{:.2f}\trotx_vel:{:.2f}\troty_vel:{:.2f}'.
+            format(rot_err[0], rot_err[1], vel_ang_x, vel_ang_y))
+      self.vel_msg.twist.angular.x = vel_ang_x
+      self.vel_msg.twist.angular.y = vel_ang_y
+      self.vel_msg.twist.angular.z = vel_ang_z
+      self.vel_pub.publish(self.vel_msg)
+      self.vel_msg_old.twist.angular.x = self.vel_msg.twist.angular.x
+      self.vel_msg_old.twist.angular.y = self.vel_msg.twist.angular.y
+      self.vel_msg_old.twist.angular.z = self.vel_msg.twist.angular.z
+      self.rate.sleep()
 
-  def keep_vertical(self):
-    # use sensor difference
+  def keep_vertical_using_diff(self):
     # 1-3 in-plane
     # 0-2 out-of-plane
-    kp = 0.002
-    dead_zone = 5
+    kp = 0.001
+    dead_zone = 3
     while not rospy.is_shutdown():
       in_plane_err = self.sensors[1] - self.sensors[3]
       out_of_plane_err = self.sensors[2] - self.sensors[0]
@@ -128,7 +143,7 @@ class FrankaMotion():
       self.vel_pub.publish(self.vel_msg)
       self.rate.sleep()
 
-  def ch101_dist_cb(self, msg):
+  def VL53L0X_dist_cb(self, msg):
     self.sensors = []
     for i in range(4):
       if ~np.isnan(msg.data[i]):
@@ -136,7 +151,7 @@ class FrankaMotion():
       else:
         self.sensors.append(self.max_range)
 
-  def ch101_norm_cb(self, msg):
+  def VL53L0X_norm_cb(self, msg):
     # if ~np.isnan(msg.data[0]) and ~np.isnan(msg.data[1]) and ~np.isnan(msg.data[2]):
     self.normal_vec = []
     self.normal_vec.append(msg.data[0])
@@ -152,4 +167,5 @@ if __name__ == "__main__":
   motion = FrankaMotion()
   # motion.home()
   # motion.land()
-  motion.keep_vertical()
+  # motion.keep_vertical_using_diff()
+  motion.keep_vertical_using_normal()
