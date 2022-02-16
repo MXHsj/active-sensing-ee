@@ -1,6 +1,6 @@
 #! /usr/bin/env python3
 '''
-automatic landing using acoustic sensors
+3 DoF control of the probe using active sensing end-effector
 '''
 import copy
 import math
@@ -9,11 +9,11 @@ import actionlib
 import numpy as np
 from franka_msgs.msg import FrankaState
 from std_msgs.msg import Float64MultiArray
+from geometry_msgs.msg import Twist
 from geometry_msgs.msg import PoseStamped
 from geometry_msgs.msg import TwistStamped
+from geometry_msgs.msg import WrenchStamped
 from rv_msgs.msg import MoveToPoseAction, MoveToPoseGoal
-# my lib
-# from GetRealSenseData import GetRealSenseData
 
 
 def rotationMatrixToEulerAngles(R):
@@ -28,8 +28,8 @@ def rotationMatrixToEulerAngles(R):
     y = math.atan2(-R[2, 0], sy)
     z = 0
   # limit angle range
-  # x = x + 2*math.pi if x < 0 else x
-  # x = x - 2*math.pi if x >= 2*math.pi else x
+  x = x + 2*math.pi if x < 0 else x
+  x = x - 2*math.pi if x >= 2*math.pi else x
   # y = y + 2*math.pi if y < 0 else y
   # y = y - 2*math.pi if y >= 2*math.pi else y
   return np.array([x, y, z])
@@ -39,27 +39,28 @@ class FrankaMotion():
   T_O_ee = None
   franka_state_msg = Float64MultiArray()
   vel_msg = TwistStamped()
-  vel_msg.twist.linear.x = 0.0
-  vel_msg.twist.linear.y = 0.0
-  vel_msg.twist.linear.z = 0.0
-  vel_msg.twist.angular.x = 0.0
-  vel_msg.twist.angular.y = 0.0
-  vel_msg.twist.angular.z = 0.0
-  sensors = []
+  vel_msg_old = TwistStamped()
+  ee_wrench = WrenchStamped()
+  dist_vec = []
   normal_vec = []
-  max_range = 250.0
+  max_range = 200.0     # maximum sensing range
+  desired_yaw = -1.57   # default eef yaw
+  pub_rate = 900        # eef velocity publishing rate
+  enDepthComp = True    # enable depth compensation
 
-  def __init__(self, pub_rate=800):
-    rospy.init_node('scan_w_acoustic_ee', anonymous=True)
-    rospy.Subscriber('ch101/normal', Float64MultiArray, self.ch101_norm_cb)
-    rospy.Subscriber('ch101/distance', Float64MultiArray, self.ch101_dist_cb)
-    rospy.Subscriber('franka_state_controller/franka_states', FrankaState, self.franka_ee_cb)
+  def __init__(self):
+    rospy.init_node('scan_w_active_sensing_ee', anonymous=True)
+    rospy.Subscriber('cmd_js', Twist, self.joystick_cb)
+    rospy.Subscriber('VL53L0X/normal', Float64MultiArray, self.VL53L0X_norm_cb)
+    rospy.Subscriber('VL53L0X/distance', Float64MultiArray, self.VL53L0X_dist_cb)
+    rospy.Subscriber('franka_state_controller/franka_states', FrankaState, self.franka_pose_cb)
+    rospy.Subscriber('/franka_state_controller/F_ext', WrenchStamped, self.franka_force_cb)
     self.vel_pub = rospy.Publisher('arm/cartesian/velocity', TwistStamped, queue_size=1)
-    self.rate = rospy.Rate(pub_rate)
-    print('waiting for sensors & robot status ...')
+    self.rate = rospy.Rate(self.pub_rate)
+    print('waiting for sensor measurements & robot status ...')
     while not rospy.is_shutdown():
-      if len(self.sensors) and self.T_O_ee is not None:
-        print('sensors & robot status received')
+      if len(self.dist_vec) and self.T_O_ee is not None:
+        print('sensor measurements & robot status received')
         break
       self.rate.sleep()
 
@@ -80,70 +81,90 @@ class FrankaMotion():
     client.send_goal(goal)
     client.wait_for_result()
 
-  def land(self):
+  def scan_with_active_ee(self):
     while not rospy.is_shutdown():
-      if self.T_O_ee is not None:
-        height = np.sort(np.array(self.sensors))[0]
-        print(self.sensors)
-        print(height)
-        if height > 134 or np.isnan(height):
-          self.vel_msg.twist.linear.z = -0.005
-        else:
-          self.vel_msg.twist.linear.z = 0.0
-      else:
-        print('landed on surface')
-        break
+      self.keep_vertical()      # update angular velocities
+      if self.enDepthComp:
+        self.keep_contact()     # update linear velocity along z
       self.vel_pub.publish(self.vel_msg)
+      print('tdx:{:.2f}  tdy:{:.2f}  tdz:{:.2f}  rdx:{:.2f}  rdy:{:.2f}  rdz:{:.2f}'.
+            format(self.vel_msg.twist.linear.x,
+                   self.vel_msg.twist.linear.y,
+                   self.vel_msg.twist.linear.z,
+                   self.vel_msg.twist.angular.x,
+                   self.vel_msg.twist.angular.y,
+                   self.vel_msg.twist.angular.z))
+      self.vel_msg_old.twist.linear.z = self.vel_msg.twist.linear.z
+      self.vel_msg_old.twist.angular.x = self.vel_msg.twist.angular.x
+      self.vel_msg_old.twist.angular.y = self.vel_msg.twist.angular.y
+      self.vel_msg_old.twist.angular.z = self.vel_msg.twist.angular.z
       self.rate.sleep()
-
-  def keep_vertical_test(self):
-    # use normal vector
-    kp = 0.01
-    while not rospy.is_shutdown():
-      T_O_ee_d = copy.deepcopy(self.T_O_ee)
-      T_O_ee_d[:3, 2] = self.normal_vec
-      # TODO: fix another DoF
-      # rpy = rotationMatrixToEulerAngles(self.T_O_ee[:3, :3])
-      # rpy_d = rotationMatrixToEulerAngles(T_O_ee_d[:3, :3])
-      # rot_err = rpy_d - rpy
-      # print('rotx:{:.2f}\trotx_d:{:.2f}\trotx_err:{:.2f}'.format(rpy[0], rpy_d[0], rot_err[0]))
-      # print('T:\n', self.T_O_ee, '\nT_d:\n', T_O_ee_d)
-      # self.vel_msg.twist.angular.x = kp*(-rot_err[0])
-      # self.vel_msg.twist.angular.y = kp*(rot_err[1])
-      # self.vel_pub.publish(self.vel_msg)
-      # self.rate.sleep()
 
   def keep_vertical(self):
-    # use sensor difference
-    # 1-3 in-plane
-    # 0-2 out-of-plane
-    kp = 0.002
-    dead_zone = 5
-    while not rospy.is_shutdown():
-      in_plane_err = self.sensors[1] - self.sensors[3]
-      out_of_plane_err = self.sensors[2] - self.sensors[0]
-      print('in-plane err:{:.2f}\tout-of-plane err:{:.2f}'.format(in_plane_err, out_of_plane_err))
-      self.vel_msg.twist.angular.x = kp*in_plane_err if abs(in_plane_err) > dead_zone else 0
-      self.vel_msg.twist.angular.y = kp*out_of_plane_err if abs(out_of_plane_err) > dead_zone else 0
-      self.vel_pub.publish(self.vel_msg)
-      self.rate.sleep()
+    kp = [0.52, 0.52, 0.2]
+    dead_zone = [0.0, 0.0, 0.0]
+    w = [3/8, 3/8, 1/8]
+    Vx = self.T_O_ee[:3, 0]
+    Vz = self.normal_vec
+    Vy = np.cross(Vz, Vx)
+    rpy_current = rotationMatrixToEulerAngles(self.T_O_ee[:3, :3])
+    rpy_desired = rotationMatrixToEulerAngles(np.array([Vx, Vy, Vz]))
+    rpy_desired[-1] = self.desired_yaw  # fix yaw angle during normal positioning
+    rot_err = rpy_desired - rpy_current
+    if abs(rot_err[0]) >= dead_zone[0]:
+      vel_ang_x = w[0]*kp[0]*(rot_err[1]) + (1-w[0])*self.vel_msg_old.twist.angular.x
+    else:
+      vel_ang_x = 0
+    if abs(rot_err[1]) >= dead_zone[1]:
+      vel_ang_y = w[1]*kp[1]*(-rot_err[0]) + (1-w[1])*self.vel_msg_old.twist.angular.y
+    else:
+      vel_ang_y = 0
+    if abs(rot_err[2]) >= dead_zone[2]:
+      vel_ang_z = w[2]*kp[2]*(rot_err[2]) + (1-w[2])*self.vel_msg_old.twist.angular.z
+    else:
+      vel_ang_z = 0
+    self.vel_msg.twist.angular.x = vel_ang_x
+    self.vel_msg.twist.angular.y = vel_ang_y
+    self.vel_msg.twist.angular.z = vel_ang_z
 
-  def ch101_dist_cb(self, msg):
-    self.sensors = []
+  def keep_contact(self):
+    desired_dist = 115  # desired minimum sensor measurement
+    desried_force = 5
+    w = 3/8
+    vel_lin_z_force = -2.0*(desried_force-self.ee_wrench.wrench.force.z)
+    # w_force = 1.0       # weight of the force
+    # closest = np.min(self.dist_vec)
+    # vel_lin_z_dist = 0.01*(desired_dist-closest)
+    # vel_lin_z = w_force*vel_lin_z_force + (1-w_force)*vel_lin_z_dist
+    vel_lin_z = vel_lin_z_force
+    self.vel_msg.twist.linear.z = w*0.01*vel_lin_z+(1-w)*self.vel_msg_old.twist.linear.z
+
+  def joystick_cb(self, msg):
+    self.vel_msg.twist.linear.x = msg.linear.x
+    self.vel_msg.twist.linear.y = msg.linear.y
+    self.desired_yaw += 0.05*msg.linear.z
+
+  def VL53L0X_dist_cb(self, msg):
+    self.dist_vec = []
     for i in range(4):
       if ~np.isnan(msg.data[i]):
-        self.sensors.append(msg.data[i])
+        self.dist_vec.append(msg.data[i])
       else:
-        self.sensors.append(self.max_range)
+        self.dist_vec.append(self.max_range)
 
-  def ch101_norm_cb(self, msg):
+  def VL53L0X_norm_cb(self, msg):
     # if ~np.isnan(msg.data[0]) and ~np.isnan(msg.data[1]) and ~np.isnan(msg.data[2]):
     self.normal_vec = []
     self.normal_vec.append(msg.data[0])
     self.normal_vec.append(msg.data[1])
     self.normal_vec.append(msg.data[2])
 
-  def franka_ee_cb(self, msg):
+  def franka_force_cb(self, msg):
+    self.ee_wrench.wrench.force.x = 0.0 if msg.wrench.force.x < 0 else msg.wrench.force.x
+    self.ee_wrench.wrench.force.y = 0.0 if msg.wrench.force.y < 0 else msg.wrench.force.y
+    self.ee_wrench.wrench.force.z = 0.0 if msg.wrench.force.z < 0 else msg.wrench.force.z
+
+  def franka_pose_cb(self, msg):
     EE_pos = msg.O_T_EE  # inv 4x4 matrix
     self.T_O_ee = np.array([EE_pos[0:4], EE_pos[4:8], EE_pos[8:12], EE_pos[12:16]]).transpose()
 
@@ -151,5 +172,4 @@ class FrankaMotion():
 if __name__ == "__main__":
   motion = FrankaMotion()
   # motion.home()
-  # motion.land()
-  motion.keep_vertical()
+  motion.scan_with_active_ee()
