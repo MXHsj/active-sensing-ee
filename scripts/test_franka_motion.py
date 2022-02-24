@@ -18,7 +18,7 @@ target = PoseStamped()
 target.header.frame_id = 'panda_link0'
 
 # Populate with target position/orientation (READY POSE)
-target.pose.position.x = 0.000
+target.pose.position.x = 0.300
 target.pose.position.y = 0.000
 target.pose.position.z = 0.500
 

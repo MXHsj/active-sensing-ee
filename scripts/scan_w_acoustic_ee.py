@@ -1,6 +1,8 @@
 #! /usr/bin/env python3
 '''
 3 DoF control of the probe using active sensing end-effector
+z-axis control reference:
+https://robotics.stackexchange.com/questions/21368/cartesian-control-for-z-vector-of-end-effector-frame-to-point-towards-a-specif
 '''
 import copy
 import math
@@ -14,6 +16,20 @@ from geometry_msgs.msg import PoseStamped
 from geometry_msgs.msg import TwistStamped
 from geometry_msgs.msg import WrenchStamped
 from rv_msgs.msg import MoveToPoseAction, MoveToPoseGoal
+
+
+def axangleToRotationMatrix(axis, angle):
+  '''
+  v = axb, s = ||v||, c = a.b
+  R = I + [v] + [v]^2*(1-c)/s^2, where [v] is skew-symmetric matrix
+  doesn't apply to a and b pointing to the opposite direction
+  '''
+  s = np.linalg.norm(axis)
+  v = axis
+  c = angle
+  vx = np.array([[0, -v[2], v[1]], [v[2], 0, -v[0]], [-v[1], v[0], 0]])
+  R = np.eye(3) + vx + np.dot(vx, vx) * (1-c)/(s**2)
+  return R
 
 
 def rotationMatrixToEulerAngles(R):
@@ -41,12 +57,14 @@ class FrankaMotion():
   vel_msg = TwistStamped()
   vel_msg_old = TwistStamped()
   ee_wrench = WrenchStamped()
+  rot_err = [0.0, 0.0, 0.0]
+  rot_err_old = [0.0, 0.0, 0.0]
   dist_vec = []
   normal_vec = []
   max_range = 200.0     # maximum sensing range
   desired_yaw = -1.57   # default eef yaw
   pub_rate = 900        # eef velocity publishing rate
-  enDepthComp = True    # enable depth compensation
+  enDepthComp = False   # enable depth compensation
 
   def __init__(self):
     rospy.init_node('scan_w_active_sensing_ee', anonymous=True)
@@ -83,46 +101,84 @@ class FrankaMotion():
 
   def scan_with_active_ee(self):
     while not rospy.is_shutdown():
-      self.keep_vertical()      # update angular velocities
+      self.keep_vertical_using_dist()      # update angular velocities
+      # self.keep_vertical_using_norm()      # update angular velocities
       if self.enDepthComp:
         self.keep_contact()     # update linear velocity along z
       self.vel_pub.publish(self.vel_msg)
-      print('tdx:{:.2f}  tdy:{:.2f}  tdz:{:.2f}  rdx:{:.2f}  rdy:{:.2f}  rdz:{:.2f}'.
-            format(self.vel_msg.twist.linear.x,
-                   self.vel_msg.twist.linear.y,
-                   self.vel_msg.twist.linear.z,
-                   self.vel_msg.twist.angular.x,
-                   self.vel_msg.twist.angular.y,
-                   self.vel_msg.twist.angular.z))
       self.vel_msg_old.twist.linear.z = self.vel_msg.twist.linear.z
       self.vel_msg_old.twist.angular.x = self.vel_msg.twist.angular.x
       self.vel_msg_old.twist.angular.y = self.vel_msg.twist.angular.y
       self.vel_msg_old.twist.angular.z = self.vel_msg.twist.angular.z
       self.rate.sleep()
+      # print('tdx:{:.2f}  tdy:{:.2f}  tdz:{:.2f}  rdx:{:.2f}  rdy:{:.2f}  rdz:{:.2f}'.
+      #       format(self.vel_msg.twist.linear.x,
+      #              self.vel_msg.twist.linear.y,
+      #              self.vel_msg.twist.linear.z,
+      #              self.vel_msg.twist.angular.x,
+      #              self.vel_msg.twist.angular.y,
+      #              self.vel_msg.twist.angular.z))
 
-  def keep_vertical(self):
-    kp = [0.52, 0.52, 0.2]
+  def keep_vertical_using_norm(self):
+    # TODO: fix bug
+    kp = [1.0, 1.0, 0.2]  # [1, 1, 0.2]
+    kd = [0.3, 0.3, 0.0]  # [0.3, 0.3, 0.2]
     dead_zone = [0.0, 0.0, 0.0]
-    w = [3/8, 3/8, 1/8]
-    Vx = self.T_O_ee[:3, 0]
-    Vz = self.normal_vec
-    Vy = np.cross(Vz, Vx)
-    rpy_current = rotationMatrixToEulerAngles(self.T_O_ee[:3, :3])
-    rpy_desired = rotationMatrixToEulerAngles(np.array([Vx, Vy, Vz]))
+    w = [1/8, 1/8, 1/8]
+    theta_base_yz = np.pi - np.arctan2(self.normal_vec[1], self.normal_vec[2])
+    print(theta_base_yz*180/3.1415)
+    xx = 0
+    xy = np.cos(theta_base_yz)
+    xz = np.sqrt(1-xx**2-xy**2)
+    Vx = np.array([xx, xy, xz])
+    Vy = np.cross(Vx, self.normal_vec)
+    R_desired = np.array([Vx, Vy, self.normal_vec])
+    rpy_current = rotationMatrixToEulerAngles(self.T_O_ee[: 3, : 3])
+    rpy_desired = rotationMatrixToEulerAngles(R_desired)
+    print(R_desired)
     rpy_desired[-1] = self.desired_yaw  # fix yaw angle during normal positioning
-    rot_err = rpy_desired - rpy_current
-    if abs(rot_err[0]) >= dead_zone[0]:
-      vel_ang_x = w[0]*kp[0]*(rot_err[1]) + (1-w[0])*self.vel_msg_old.twist.angular.x
+    self.rot_err = rpy_desired - rpy_current
+    print(self.rot_err)
+    print('eef err x:{:.4f}  eef err y:{:.4f}  eef err z:{:.4f}'.format(
+        self.rot_err[1], self.rot_err[0], self.rot_err[2]))
+    if abs(self.rot_err[0]) >= dead_zone[0]:
+      vel_ang_x = kp[0]*(self.rot_err[0]) + kd[0]*(self.rot_err[0]-self.rot_err_old[0])/(1/self.pub_rate)
+      vel_ang_x = w[0]*vel_ang_x + (1-w[0])*self.vel_msg_old.twist.angular.x
     else:
       vel_ang_x = 0
-    if abs(rot_err[1]) >= dead_zone[1]:
-      vel_ang_y = w[1]*kp[1]*(-rot_err[0]) + (1-w[1])*self.vel_msg_old.twist.angular.y
+    if abs(self.rot_err[1]) >= dead_zone[1]:
+      vel_ang_y = kp[1]*(self.rot_err[1]) + kd[1]*(self.rot_err[1]-self.rot_err_old[1])/(1/self.pub_rate)
+      vel_ang_y = w[1]*vel_ang_y + (1-w[1])*self.vel_msg_old.twist.angular.y
     else:
       vel_ang_y = 0
-    if abs(rot_err[2]) >= dead_zone[2]:
-      vel_ang_z = w[2]*kp[2]*(rot_err[2]) + (1-w[2])*self.vel_msg_old.twist.angular.z
+    if abs(self.rot_err[2]) >= dead_zone[2]:
+      vel_ang_z = kp[2]*(self.rot_err[2])
+      vel_ang_z = w[2]*vel_ang_z + (1-w[2])*self.vel_msg_old.twist.angular.z
     else:
       vel_ang_z = 0
+    self.rot_err_old = self.rot_err.copy()
+    self.vel_msg.twist.angular.x = vel_ang_y
+    self.vel_msg.twist.angular.y = -vel_ang_x
+    # self.vel_msg.twist.angular.z = vel_ang_z
+
+  def keep_vertical_using_dist(self):
+    # 2-4 --> in-plane; 1-3 --> out-of-plane
+    kp = [0.009, 0.009, 0.15]
+    kd = [0.005, 0.005, 0.001]
+    dead_zone = [0, 0, 0]  # [8, 8, 0]
+    rpy_current = rotationMatrixToEulerAngles(self.T_O_ee[: 3, : 3])
+    self.rot_err[0] = self.dist_vec[1] - self.dist_vec[3]   # in-plane error
+    self.rot_err[1] = self.dist_vec[2] - self.dist_vec[0]   # out-of-plane error
+    self.rot_err[2] = self.desired_yaw - rpy_current[-1]
+    print('err_x:{:.3f}  err_y:{:.3f}  err_z:{:.3f}'.format(
+        self.rot_err[1], self.rot_err[0], self.rot_err[2]))
+    vel_ang_x = kp[0]*self.rot_err[0] + kd[0]*(self.rot_err[0]-self.rot_err_old[0])/(1/self.pub_rate) \
+        if abs(self.rot_err[0]) > dead_zone[0] else 0
+    vel_ang_y = kp[1]*self.rot_err[1] + kd[1]*(self.rot_err[1]-self.rot_err_old[1])/(1/self.pub_rate) \
+        if abs(self.rot_err[1]) > dead_zone[1] else 0
+    vel_ang_z = kp[2]*self.rot_err[2] + kd[2]*(self.rot_err[2]-self.rot_err_old[2])/(1/self.pub_rate) \
+        if abs(self.rot_err[2]) > dead_zone[2] else 0
+    self.rot_err_old = self.rot_err.copy()
     self.vel_msg.twist.angular.x = vel_ang_x
     self.vel_msg.twist.angular.y = vel_ang_y
     self.vel_msg.twist.angular.z = vel_ang_z
@@ -130,14 +186,14 @@ class FrankaMotion():
   def keep_contact(self):
     desired_dist = 115  # desired minimum sensor measurement
     desried_force = 5
-    w = 3/8
-    vel_lin_z_force = -2.0*(desried_force-self.ee_wrench.wrench.force.z)
+    w = 1/8
+    vel_lin_z_force = -0.014*(desried_force-self.ee_wrench.wrench.force.z)
     # w_force = 1.0       # weight of the force
     # closest = np.min(self.dist_vec)
     # vel_lin_z_dist = 0.01*(desired_dist-closest)
     # vel_lin_z = w_force*vel_lin_z_force + (1-w_force)*vel_lin_z_dist
     vel_lin_z = vel_lin_z_force
-    self.vel_msg.twist.linear.z = w*0.01*vel_lin_z+(1-w)*self.vel_msg_old.twist.linear.z
+    self.vel_msg.twist.linear.z = w*vel_lin_z+(1-w)*self.vel_msg_old.twist.linear.z
 
   def joystick_cb(self, msg):
     self.vel_msg.twist.linear.x = msg.linear.x
