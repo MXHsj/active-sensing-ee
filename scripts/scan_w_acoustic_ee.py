@@ -59,12 +59,14 @@ class FrankaMotion():
   ee_wrench = WrenchStamped()
   rot_err = [0.0, 0.0, 0.0]
   rot_err_old = [0.0, 0.0, 0.0]
+  force_err = 0.0
+  force_err_old = 0.0
   dist_vec = []
   normal_vec = []
   max_range = 200.0     # maximum sensing range
   desired_yaw = -1.57   # default eef yaw
   pub_rate = 900        # eef velocity publishing rate
-  enDepthComp = False   # enable depth compensation
+  enDepthComp = True   # enable depth compensation
 
   def __init__(self):
     rospy.init_node('scan_w_active_sensing_ee', anonymous=True)
@@ -95,7 +97,6 @@ class FrankaMotion():
     target.pose.orientation.z = 0.00
     target.pose.orientation.w = 0.00
     goal = MoveToPoseGoal(goal_pose=target)
-    # Send goal and wait for it to finish
     client.send_goal(goal)
     client.wait_for_result()
 
@@ -121,24 +122,18 @@ class FrankaMotion():
 
   def keep_vertical_using_norm(self):
     # TODO: fix bug
-    kp = [1.0, 1.0, 0.2]  # [1, 1, 0.2]
+    kp = [3.5, 3.5, 0.2]  # [1, 1, 0.2]
     kd = [0.3, 0.3, 0.0]  # [0.3, 0.3, 0.2]
     dead_zone = [0.0, 0.0, 0.0]
-    w = [1/8, 1/8, 1/8]
-    theta_base_yz = np.pi - np.arctan2(self.normal_vec[1], self.normal_vec[2])
-    print(theta_base_yz*180/3.1415)
-    xx = 0
-    xy = np.cos(theta_base_yz)
-    xz = np.sqrt(1-xx**2-xy**2)
-    Vx = np.array([xx, xy, xz])
-    Vy = np.cross(Vx, self.normal_vec)
+    w = [3/8, 3/8, 1/8]
+    Vx = np.cross(self.normal_vec, np.array([0, 1, 0]))
+    Vy = np.cross(self.normal_vec, Vx)
     R_desired = np.array([Vx, Vy, self.normal_vec])
+    # print(R_desired)
     rpy_current = rotationMatrixToEulerAngles(self.T_O_ee[: 3, : 3])
     rpy_desired = rotationMatrixToEulerAngles(R_desired)
-    print(R_desired)
-    rpy_desired[-1] = self.desired_yaw  # fix yaw angle during normal positioning
+    rpy_desired[2] = self.desired_yaw  # fix yaw angle during normal positioning
     self.rot_err = rpy_desired - rpy_current
-    print(self.rot_err)
     print('eef err x:{:.4f}  eef err y:{:.4f}  eef err z:{:.4f}'.format(
         self.rot_err[1], self.rot_err[0], self.rot_err[2]))
     if abs(self.rot_err[0]) >= dead_zone[0]:
@@ -158,20 +153,16 @@ class FrankaMotion():
       vel_ang_z = 0
     self.rot_err_old = self.rot_err.copy()
     self.vel_msg.twist.angular.x = vel_ang_y
-    self.vel_msg.twist.angular.y = -vel_ang_x
-    # self.vel_msg.twist.angular.z = vel_ang_z
+    self.vel_msg.twist.angular.y = -vel_ang_x print(self.ee_wrench.wrench.force.z)
 
-  def keep_vertical_using_dist(self):
-    # 2-4 --> in-plane; 1-3 --> out-of-plane
-    kp = [0.009, 0.009, 0.15]
     kd = [0.005, 0.005, 0.001]
     dead_zone = [0, 0, 0]  # [8, 8, 0]
     rpy_current = rotationMatrixToEulerAngles(self.T_O_ee[: 3, : 3])
     self.rot_err[0] = self.dist_vec[1] - self.dist_vec[3]   # in-plane error
     self.rot_err[1] = self.dist_vec[2] - self.dist_vec[0]   # out-of-plane error
     self.rot_err[2] = self.desired_yaw - rpy_current[-1]
-    print('err_x:{:.3f}  err_y:{:.3f}  err_z:{:.3f}'.format(
-        self.rot_err[1], self.rot_err[0], self.rot_err[2]))
+    # print('err_x:{:.3f}  err_y:{:.3f}  err_z:{:.3f}'.format(
+    #     self.rot_err[1], self.rot_err[0], self.rot_err[2]))
     vel_ang_x = kp[0]*self.rot_err[0] + kd[0]*(self.rot_err[0]-self.rot_err_old[0])/(1/self.pub_rate) \
         if abs(self.rot_err[0]) > dead_zone[0] else 0
     vel_ang_y = kp[1]*self.rot_err[1] + kd[1]*(self.rot_err[1]-self.rot_err_old[1])/(1/self.pub_rate) \
@@ -184,21 +175,24 @@ class FrankaMotion():
     self.vel_msg.twist.angular.z = vel_ang_z
 
   def keep_contact(self):
-    desired_dist = 115  # desired minimum sensor measurement
-    desried_force = 5
+    desired_dist = 120  # desired minimum sensor measurement
+    desried_force = 5.0
     w = 1/8
-    vel_lin_z_force = -0.014*(desried_force-self.ee_wrench.wrench.force.z)
-    # w_force = 1.0       # weight of the force
-    # closest = np.min(self.dist_vec)
-    # vel_lin_z_dist = 0.01*(desired_dist-closest)
-    # vel_lin_z = w_force*vel_lin_z_force + (1-w_force)*vel_lin_z_dist
-    vel_lin_z = vel_lin_z_force
+    closest = np.min(self.dist_vec)
+    if closest >= desired_dist:
+      vel_lin_z = 0.001*(desired_dist-closest)
+      print('landing ...')
+    else:
+      self.force_err = desried_force-self.ee_wrench.wrench.force.z
+      vel_lin_z = -0.02*self.force_err - 0.00*(self.force_err-self.force_err_old)/(1/self.pub_rate)
+    print(self.ee_wrench.wrench.force.z)
+    self.force_err_old = desried_force-self.ee_wrench.wrench.force.z
     self.vel_msg.twist.linear.z = w*vel_lin_z+(1-w)*self.vel_msg_old.twist.linear.z
 
   def joystick_cb(self, msg):
     self.vel_msg.twist.linear.x = msg.linear.x
     self.vel_msg.twist.linear.y = msg.linear.y
-    self.desired_yaw += 0.05*msg.linear.z
+    self.desired_yaw += 0.03*msg.linear.z
 
   def VL53L0X_dist_cb(self, msg):
     self.dist_vec = []
