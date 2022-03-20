@@ -153,8 +153,12 @@ class FrankaMotion():
       vel_ang_z = 0
     self.rot_err_old = self.rot_err.copy()
     self.vel_msg.twist.angular.x = vel_ang_y
-    self.vel_msg.twist.angular.y = -vel_ang_x print(self.ee_wrench.wrench.force.z)
+    self.vel_msg.twist.angular.y = -vel_ang_x
+    self.vel_msg.twist.angular.z = vel_ang_z
 
+  def keep_vertical_using_dist(self):
+    # 2-4 --> in-plane; 1-3 --> out-of-plane
+    kp = [0.009, 0.009, 0.15]
     kd = [0.005, 0.005, 0.001]
     dead_zone = [0, 0, 0]  # [8, 8, 0]
     rpy_current = rotationMatrixToEulerAngles(self.T_O_ee[: 3, : 3])
@@ -175,17 +179,18 @@ class FrankaMotion():
     self.vel_msg.twist.angular.z = vel_ang_z
 
   def keep_contact(self):
-    desired_dist = 120  # desired minimum sensor measurement
-    desried_force = 5.0
-    w = 1/8
+    desired_dist = 150  # desired minimum sensor measurement
+    desried_force = 3.5
+    w = 1.0  # 1/8
     closest = np.min(self.dist_vec)
     if closest >= desired_dist:
       vel_lin_z = 0.001*(desired_dist-closest)
       print('landing ...')
     else:
       self.force_err = desried_force-self.ee_wrench.wrench.force.z
-      vel_lin_z = -0.02*self.force_err - 0.00*(self.force_err-self.force_err_old)/(1/self.pub_rate)
-    print(self.ee_wrench.wrench.force.z)
+      vel_lin_z = -0.005*self.force_err + 0.003*(self.force_err-self.force_err_old)/(1/self.pub_rate)
+    # print(self.ee_wrench.wrench.force.z)
+    # print(vel_lin_z)
     self.force_err_old = desried_force-self.ee_wrench.wrench.force.z
     self.vel_msg.twist.linear.z = w*vel_lin_z+(1-w)*self.vel_msg_old.twist.linear.z
 
