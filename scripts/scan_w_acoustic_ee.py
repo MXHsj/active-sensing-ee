@@ -56,6 +56,7 @@ class FrankaMotion():
   franka_state_msg = Float64MultiArray()
   vel_msg = TwistStamped()
   vel_msg_old = TwistStamped()
+  vel_msg_tele = TwistStamped()
   ee_wrench = WrenchStamped()
   rot_err = [0.0, 0.0, 0.0]
   rot_err_old = [0.0, 0.0, 0.0]
@@ -63,6 +64,8 @@ class FrankaMotion():
   force_err_old = 0.0
   dist_vec = []
   normal_vec = []
+  Fz_queue = []
+  Fz_window = 20        # moving average window on z-axis force
   max_range = 200.0     # maximum sensing range
   desired_yaw = -1.57   # default eef yaw
   pub_rate = 900        # eef velocity publishing rate
@@ -102,6 +105,11 @@ class FrankaMotion():
 
   def scan_with_active_ee(self):
     while not rospy.is_shutdown():
+      if len(self.Fz_queue) < self.Fz_window:
+        self.Fz_queue.append(self.ee_wrench.wrench.force.z)
+      else:
+        self.Fz_queue.pop(0)
+        self.Fz_queue.append(self.ee_wrench.wrench.force.z)
       self.keep_vertical_using_dist()      # update angular velocities
       # self.keep_vertical_using_norm()      # update angular velocities
       if self.enDepthComp:
@@ -112,13 +120,6 @@ class FrankaMotion():
       self.vel_msg_old.twist.angular.y = self.vel_msg.twist.angular.y
       self.vel_msg_old.twist.angular.z = self.vel_msg.twist.angular.z
       self.rate.sleep()
-      # print('tdx:{:.2f}  tdy:{:.2f}  tdz:{:.2f}  rdx:{:.2f}  rdy:{:.2f}  rdz:{:.2f}'.
-      #       format(self.vel_msg.twist.linear.x,
-      #              self.vel_msg.twist.linear.y,
-      #              self.vel_msg.twist.linear.z,
-      #              self.vel_msg.twist.angular.x,
-      #              self.vel_msg.twist.angular.y,
-      #              self.vel_msg.twist.angular.z))
 
   def keep_vertical_using_norm(self):
     # TODO: fix bug
@@ -181,22 +182,27 @@ class FrankaMotion():
   def keep_contact(self):
     desired_dist = 150  # desired minimum sensor measurement
     desried_force = 3.5
-    w = 1.0  # 1/8
+    w = 0.3
+    Vz = self.T_O_ee[:3, 2]
     closest = np.min(self.dist_vec)
     if closest >= desired_dist:
       vel_lin_z = 0.001*(desired_dist-closest)
       print('landing ...')
     else:
-      self.force_err = desried_force-self.ee_wrench.wrench.force.z
-      vel_lin_z = -0.005*self.force_err + 0.003*(self.force_err-self.force_err_old)/(1/self.pub_rate)
-    # print(self.ee_wrench.wrench.force.z)
-    # print(vel_lin_z)
+      if len(self.Fz_queue) > 1:
+        current_force = np.mean(self.Fz_queue)
+      else:
+        current_force = self.ee_wrench.wrench.force.z
+      self.force_err = desried_force - current_force
+      vel_lin_z = -0.005*self.force_err + 0.00*(self.force_err-self.force_err_old)/(1/self.pub_rate)
     self.force_err_old = desried_force-self.ee_wrench.wrench.force.z
-    self.vel_msg.twist.linear.z = w*vel_lin_z+(1-w)*self.vel_msg_old.twist.linear.z
+    self.vel_msg.twist.linear.x = w*self.vel_msg_tele.twist.linear.x + (1-w)*vel_lin_z*Vz[0]
+    self.vel_msg.twist.linear.y = w*self.vel_msg_tele.twist.linear.y + (1-w)*vel_lin_z*Vz[1]
+    self.vel_msg.twist.linear.z = -vel_lin_z*Vz[2]
 
   def joystick_cb(self, msg):
-    self.vel_msg.twist.linear.x = msg.linear.x
-    self.vel_msg.twist.linear.y = msg.linear.y
+    self.vel_msg_tele.twist.linear.x = msg.linear.x
+    self.vel_msg_tele.twist.linear.y = msg.linear.y
     self.desired_yaw += 0.03*msg.linear.z
 
   def VL53L0X_dist_cb(self, msg):
@@ -215,6 +221,7 @@ class FrankaMotion():
     self.normal_vec.append(msg.data[2])
 
   def franka_force_cb(self, msg):
+    # TODO: add moving average window
     self.ee_wrench.wrench.force.x = 0.0 if msg.wrench.force.x < 0 else msg.wrench.force.x
     self.ee_wrench.wrench.force.y = 0.0 if msg.wrench.force.y < 0 else msg.wrench.force.y
     self.ee_wrench.wrench.force.z = 0.0 if msg.wrench.force.z < 0 else msg.wrench.force.z

@@ -36,6 +36,7 @@ def force_callback(msg):
 
 
 if __name__ == "__main__":
+  # TODO: record teleop command
   freq = 30
   T_O_ee = None
   Fx = None
