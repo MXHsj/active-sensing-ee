@@ -117,23 +117,22 @@ class GetRealSenseData():
     '''
     given a pixel in 2D image, calculate normal vector
     '''
-    # TODO: test this method
     patch = get_patch(pixel)
-    points = self.get_xyz(self.depth_frame, patch)
+    points = self.get_xyz(patch)
     norm = get_surface_normal(points[:, 0], points[:, 1], points[:, 2])
-    return norm
+    pos = points[0, :]
+    return norm, pos
 
 
 # test case
 if __name__ == "__main__":
   get_realsense_data = GetRealSenseData()
-
   cv2.namedWindow('RGB-depth', cv2.WINDOW_AUTOSIZE)
   while True:
-    get_realsense_data.stream_depth2color_aligned()
-    color_depth_stack = np.vstack((get_realsense_data.color_image, get_realsense_data.depth_colormap))
-    cv2.imshow('RGB-depth', color_depth_stack)
     key = cv2.waitKey(10)
     if key & 0xFF == ord('Q') or key == 27:
       cv2.destroyAllWindows()
       break
+    get_realsense_data.stream_depth2color_aligned()
+    color_depth_stack = np.vstack((get_realsense_data.color_image, get_realsense_data.depth_colormap))
+    cv2.imshow('RGB-depth', color_depth_stack)

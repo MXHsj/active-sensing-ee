@@ -1,20 +1,22 @@
 #! /usr/bin/env python3
 '''
 3 DoF control of the probe using active sensing end-effector
-z-axis control reference:
+ee approach vector control reference:
 https://robotics.stackexchange.com/questions/21368/cartesian-control-for-z-vector-of-end-effector-frame-to-point-towards-a-specif
 '''
 import copy
 import math
+import time
 import rospy
 import actionlib
 import numpy as np
 from franka_msgs.msg import FrankaState
-from std_msgs.msg import Float64MultiArray
 from geometry_msgs.msg import Twist
 from geometry_msgs.msg import PoseStamped
 from geometry_msgs.msg import TwistStamped
 from geometry_msgs.msg import WrenchStamped
+from std_msgs.msg import Float64MultiArray
+from tf.transformations import quaternion_from_matrix
 from rv_msgs.msg import MoveToPoseAction, MoveToPoseGoal
 
 
@@ -69,10 +71,9 @@ class FrankaMotion():
   max_range = 200.0     # maximum sensing range
   desired_yaw = -1.57   # default eef yaw
   pub_rate = 900        # eef velocity publishing rate
-  enDepthComp = True   # enable depth compensation
+  enDepthComp = True    # enable depth compensation
 
   def __init__(self):
-    rospy.init_node('scan_w_active_sensing_ee', anonymous=True)
     rospy.Subscriber('cmd_js', Twist, self.joystick_cb)
     rospy.Subscriber('VL53L0X/normal', Float64MultiArray, self.VL53L0X_norm_cb)
     rospy.Subscriber('VL53L0X/distance', Float64MultiArray, self.VL53L0X_dist_cb)
@@ -87,14 +88,22 @@ class FrankaMotion():
         break
       self.rate.sleep()
 
-  def home(self):
+  def move2pose(self, T_O_EE_d=np.array([[0.0, -1.0, 0.0, 0.37],
+                                         [-1.0, 0.0, 0.0, 0.0],
+                                         [0.0, 0.0, -1.0, 0.3],
+                                         [0.0, 0.0, 0.0, 1.0]])):
     client = actionlib.SimpleActionClient('/arm/cartesian/pose', MoveToPoseAction)
     client.wait_for_server()
     target = PoseStamped()
     target.header.frame_id = 'panda_link0'
-    target.pose.position.x = 0.37
-    target.pose.position.y = 0.0
-    target.pose.position.z = 0.30
+    quat = quaternion_from_matrix(T_O_EE_d)
+    target.pose.position.x = T_O_EE_d[0, -1]
+    target.pose.position.y = T_O_EE_d[1, -1]
+    target.pose.position.z = T_O_EE_d[2, -1]
+    # target.pose.orientation.x = quat[0]  # -0.7071
+    # target.pose.orientation.y = quat[1]  # 0.7071
+    # target.pose.orientation.z = quat[2]  # 0.00
+    # target.pose.orientation.w = quat[3]  # 0.00
     target.pose.orientation.x = -0.7071
     target.pose.orientation.y = 0.7071
     target.pose.orientation.z = 0.00
@@ -102,8 +111,9 @@ class FrankaMotion():
     goal = MoveToPoseGoal(goal_pose=target)
     client.send_goal(goal)
     client.wait_for_result()
+    print('reached pose goal')
 
-  def scan_with_active_ee(self):
+  def scan_w_active_sensing_ee(self):
     while not rospy.is_shutdown():
       if len(self.Fz_queue) < self.Fz_window:
         self.Fz_queue.append(self.ee_wrench.wrench.force.z)
@@ -232,6 +242,8 @@ class FrankaMotion():
 
 
 if __name__ == "__main__":
+  rospy.init_node('franka_motion', anonymous=True)
   motion = FrankaMotion()
-  # motion.home()
-  motion.scan_with_active_ee()
+  # motion.move2pose()
+  while not rospy.is_shutdown():
+    motion.scan_w_active_sensing_ee()
