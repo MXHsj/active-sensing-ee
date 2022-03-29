@@ -11,18 +11,19 @@ from GetRealSenseData import GetRealSenseData
 
 
 def convert2base(T_cam_tar):
-  # convert target from camera frame to base frame
+  # convert target from camera frame T_cam_tar to base frame T_O_tar
   global T_O_ee, T_ee_cam
   if T_O_ee is not None:
     T_O_cam = np.matmul(T_O_ee, T_ee_cam)
-    T_O_tar = np.matmul(T_O_cam, T_cam_tar)
+    T = np.matmul(T_O_cam, T_cam_tar)
   else:
-    T_O_tar = float('nan')*np.ones([4, 4])
+    T = float('nan')*np.ones([4, 4])
     print("no robot info")
-  return T_O_tar
+  return T
 
 
 def get_pose(P0, Vz):
+  global T_O_tar
   if not np.isnan(Vz[0]):
     Vz[0] = -Vz[0]
     Vz[1] = -Vz[1]
@@ -42,7 +43,7 @@ def get_pose(P0, Vz):
                           [cam_tar[2], cam_tar[5], cam_tar[8], cam_tar[11]],
                           [0.0, 0.0, 0.0, 1.0]])
     # entry pose w.r.t base
-    dist_coeff = 0.045      # 0.075
+    dist_coeff = 0.1      # 0.075
     Pz = np.subtract(P0, [dist_coeff*Vzi for Vzi in Vz])
     T_cam_tar[0:3, 3] = Pz
     T_O_tar = convert2base(T_cam_tar)
@@ -53,10 +54,14 @@ def get_pose(P0, Vz):
 
 # ========== parameters ==========
 # hand-eye calibration for Clarius ee
-T_ee_cam = np.array([[0.0, -math.cos(math.pi/8), math.sin(math.pi/8), 0.0886],
-                     [1.0, 0.0, 0.0, -0.0175],
-                     [0.0, math.sin(math.pi/8), math.cos(math.pi/8), -0.2889],
+T_ee_cam = np.array([[0.0, -math.cos(math.pi/8), math.sin(math.pi/8), 0.0910],
+                     [1.0, 0.0, 0.0, -0.0291],
+                     [0.0, math.sin(math.pi/8), math.cos(math.pi/8), -0.2568],
                      [0.0, 0.0, 0.0, 1.0]])
+# T_ee_cam = np.array([[0.0, -0.9272, 0.3746, 0.0886],
+#                      [1.0, 0.0, 0.0, -0.0175],
+#                      [0.0, 0.3746, 0.9272, -0.2889],
+#                      [0.0, 0.0, 0.0, 1.0]])
 # robot home pose (debug purpose)
 T_O_ee = np.array([[0.0, -1.0, 0.0, 0.37],
                    [-1.0, 0.0, 0.0, 0.0],
@@ -76,9 +81,9 @@ doScan = False         # set to True to enable scanning with active-sensing ee
 
 
 def main():
-  global T_O_ee, T_O_tar, doScan
+  global T_O_ee, T_O_tar, doScan, width, height, ss, pix_tar
   rospy.init_node('scan_with_active_sensing_ee', anonymous=True)
-  motion = FrankaMotion()
+  motion = FrankaMotion(depth_compensation=True)
   rs = GetRealSenseData()
   cv2.namedWindow('realsense', cv2.WINDOW_AUTOSIZE)
   rate = rospy.Rate(800)
@@ -104,8 +109,9 @@ def main():
     # landing pose
     elif key == ord('p'):
       print('publish target @({:d}, {:d})'.format(pix_tar[0], pix_tar[1]))
-      norm, pos_tar = rs.get_surface_normal(rs.color_frame, pix_tar)
-      print('normal vector:', norm)
+      norm, pos_tar = rs.get_surface_normal(pix_tar)
+      print(pos_tar, norm)
+      # print('normal vector:', norm)
       T_O_tar = get_pose(pos_tar, norm)
       print('T_O_tar \n', T_O_tar)
     elif key == ord('g'):
@@ -117,10 +123,12 @@ def main():
       doScan = False
       motion.move2pose()
 
-    if doScan:
-      motion.scan_w_active_sensing_ee()
+    # if doScan:
+    #   motion.scan_w_active_sensing_ee()
+    #   doScan = False
 
-    frame2show = cv2.circle(frame2show, (pix_tar[0], pix_tar[1]), 5, (30, 90, 30), -1)
+    frame2show = cv2.rectangle(
+        frame2show, (pix_tar[0]-10, pix_tar[1]-10), (pix_tar[0]+10, pix_tar[1]+10), (30, 90, 30), 2, -1)
     cv2.imshow('realsense', frame2show)
     rate.sleep()
 

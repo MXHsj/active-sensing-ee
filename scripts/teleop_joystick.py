@@ -55,10 +55,11 @@ class Teleop:
     # ROS stuff
     cmd_pub = rospy.Publisher('cmd_js', Twist, queue_size=1)
     # cmd_pub = rospy.Publisher('franka_cmd_acc', Twist, queue_size=1)
-    contact_mode_pub = rospy.Publisher('isContact', Bool, queue_size=1)
+    contact_mode_pub = rospy.Publisher('contact_mode/isContact', Bool, queue_size=1)
+    rospy.Subscriber('contact_mode/setContact', Bool, self.contact_mode_callback)
     rospy.Subscriber("joy", Joy, self.js_callback)
     rospy.Subscriber('franka_state_controller/franka_states', FrankaState, self.ee_callback)
-    rospy.Subscriber('/franka_state_controller/F_ext', WrenchStamped, self.force_callback)
+    rospy.Subscriber('franka_state_controller/F_ext', WrenchStamped, self.force_callback)
     self.freq = rospy.get_param('~hz', 100)
     rate = rospy.Rate(self.freq)
 
@@ -250,6 +251,9 @@ class Teleop:
     self.cmd.angular.x -= math.copysign(incre, self.cmd.angular.x) if abs(self.cmd.angular.x) > tol else 0.0
     self.cmd.angular.y -= math.copysign(incre, self.cmd.angular.y) if abs(self.cmd.angular.y) > tol else 0.0
     self.cmd.angular.z -= math.copysign(incre, self.cmd.angular.z) if abs(self.cmd.angular.z) > tol else 0.0
+
+  def contact_mode_callback(self, contact_msg):
+    self.isContact = contact_msg.data
 
   def js_callback(self, js_msg):
     self.js = js_msg

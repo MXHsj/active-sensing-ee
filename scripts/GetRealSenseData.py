@@ -113,7 +113,7 @@ class GetRealSenseData():
     pix_formatted = np.reshape(pix, [len(pix), 2])
     return pix_formatted
 
-  def get_surface_normal(self, frame, pixel: list) -> np.ndarray:
+  def get_surface_normal(self, pixel: list) -> np.ndarray:
     '''
     given a pixel in 2D image, calculate normal vector
     '''

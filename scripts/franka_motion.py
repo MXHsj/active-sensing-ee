@@ -10,6 +10,7 @@ import time
 import rospy
 import actionlib
 import numpy as np
+from std_msgs.msg import Bool
 from franka_msgs.msg import FrankaState
 from geometry_msgs.msg import Twist
 from geometry_msgs.msg import PoseStamped
@@ -71,16 +72,19 @@ class FrankaMotion():
   max_range = 200.0     # maximum sensing range
   desired_yaw = -1.57   # default eef yaw
   pub_rate = 900        # eef velocity publishing rate
-  enDepthComp = True    # enable depth compensation
+  enDepthComp = True    # flag to enable depth compensation
+  endControl = False    # flag to end scanning
 
-  def __init__(self):
-    rospy.Subscriber('cmd_js', Twist, self.joystick_cb)
+  def __init__(self, depth_compensation=True):
+    rospy.Subscriber('cmd_js', Twist, self.joystick_axes_cb)
+    rospy.Subscriber('isContact', Bool, self.joystick_button_cb)
     rospy.Subscriber('VL53L0X/normal', Float64MultiArray, self.VL53L0X_norm_cb)
     rospy.Subscriber('VL53L0X/distance', Float64MultiArray, self.VL53L0X_dist_cb)
     rospy.Subscriber('franka_state_controller/franka_states', FrankaState, self.franka_pose_cb)
     rospy.Subscriber('/franka_state_controller/F_ext', WrenchStamped, self.franka_force_cb)
     self.vel_pub = rospy.Publisher('arm/cartesian/velocity', TwistStamped, queue_size=1)
     self.rate = rospy.Rate(self.pub_rate)
+    self.enDepthComp = depth_compensation
     print('waiting for sensor measurements & robot status ...')
     while not rospy.is_shutdown():
       if len(self.dist_vec) and self.T_O_ee is not None:
@@ -100,14 +104,14 @@ class FrankaMotion():
     target.pose.position.x = T_O_EE_d[0, -1]
     target.pose.position.y = T_O_EE_d[1, -1]
     target.pose.position.z = T_O_EE_d[2, -1]
-    # target.pose.orientation.x = quat[0]  # -0.7071
-    # target.pose.orientation.y = quat[1]  # 0.7071
-    # target.pose.orientation.z = quat[2]  # 0.00
-    # target.pose.orientation.w = quat[3]  # 0.00
     target.pose.orientation.x = -0.7071
     target.pose.orientation.y = 0.7071
     target.pose.orientation.z = 0.00
     target.pose.orientation.w = 0.00
+    # target.pose.orientation.x = quat[0]
+    # target.pose.orientation.y = quat[1]
+    # target.pose.orientation.z = quat[2]
+    # target.pose.orientation.w = quat[3]
     goal = MoveToPoseGoal(goal_pose=target)
     client.send_goal(goal)
     client.wait_for_result()
@@ -115,11 +119,13 @@ class FrankaMotion():
 
   def scan_w_active_sensing_ee(self):
     while not rospy.is_shutdown():
+      # ========== moving average window on force sensing ==========
       if len(self.Fz_queue) < self.Fz_window:
         self.Fz_queue.append(self.ee_wrench.wrench.force.z)
       else:
         self.Fz_queue.pop(0)
         self.Fz_queue.append(self.ee_wrench.wrench.force.z)
+      # ============================================================
       self.keep_vertical_using_dist()      # update angular velocities
       # self.keep_vertical_using_norm()      # update angular velocities
       if self.enDepthComp:
@@ -129,6 +135,11 @@ class FrankaMotion():
       self.vel_msg_old.twist.angular.x = self.vel_msg.twist.angular.x
       self.vel_msg_old.twist.angular.y = self.vel_msg.twist.angular.y
       self.vel_msg_old.twist.angular.z = self.vel_msg.twist.angular.z
+      # TODO: add quit condition
+      if self.endControl:
+        print('scan ended')
+        self.endControl = False
+        break
       self.rate.sleep()
 
   def keep_vertical_using_norm(self):
@@ -210,10 +221,13 @@ class FrankaMotion():
     self.vel_msg.twist.linear.y = w*self.vel_msg_tele.twist.linear.y + (1-w)*vel_lin_z*Vz[1]
     self.vel_msg.twist.linear.z = -vel_lin_z*Vz[2]
 
-  def joystick_cb(self, msg):
+  def joystick_axes_cb(self, msg):
     self.vel_msg_tele.twist.linear.x = msg.linear.x
     self.vel_msg_tele.twist.linear.y = msg.linear.y
     self.desired_yaw += 0.03*msg.linear.z
+
+  def joystick_button_cb(self, msg):
+    self.endControl = msg.data
 
   def VL53L0X_dist_cb(self, msg):
     self.dist_vec = []
@@ -231,7 +245,6 @@ class FrankaMotion():
     self.normal_vec.append(msg.data[2])
 
   def franka_force_cb(self, msg):
-    # TODO: add moving average window
     self.ee_wrench.wrench.force.x = 0.0 if msg.wrench.force.x < 0 else msg.wrench.force.x
     self.ee_wrench.wrench.force.y = 0.0 if msg.wrench.force.y < 0 else msg.wrench.force.y
     self.ee_wrench.wrench.force.z = 0.0 if msg.wrench.force.z < 0 else msg.wrench.force.z
@@ -243,7 +256,7 @@ class FrankaMotion():
 
 if __name__ == "__main__":
   rospy.init_node('franka_motion', anonymous=True)
-  motion = FrankaMotion()
+  motion = FrankaMotion(depth_compensation=True)
   # motion.move2pose()
   while not rospy.is_shutdown():
     motion.scan_w_active_sensing_ee()
