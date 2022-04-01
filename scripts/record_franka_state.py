@@ -7,6 +7,7 @@ import csv
 import rospy
 import numpy as np
 from franka_msgs.msg import FrankaState
+from geometry_msgs.msg import Twist
 from geometry_msgs.msg import WrenchStamped
 
 
@@ -22,29 +23,34 @@ def msg2matrix(raw_msg):
   return T
 
 
-def ee_callback(msg):
+def franka_pose_cb(msg):
   EE_pos = msg.O_T_EE_d  # inv 4x4 matrix
   global T_O_ee
   T_O_ee = np.array([EE_pos[0:4], EE_pos[4:8], EE_pos[8:12], EE_pos[12:16]]).transpose()
 
 
-def force_callback(msg):
+def franka_force_cb(msg):
   global Fx, Fy, Fz
   Fx = msg.wrench.force.x
   Fy = msg.wrench.force.y
   Fz = msg.wrench.force.z
 
 
-if __name__ == "__main__":
+def joystick_axes_cb(msg):
   # TODO: record teleop command
-  freq = 30
+  pass
+
+
+if __name__ == "__main__":
+  freq = 30         # loop rate
   T_O_ee = None
   Fx = None
   Fy = None
   Fz = None
   rospy.init_node('franka_state_logger', anonymous=True)
-  rospy.Subscriber('franka_state_controller/franka_states', FrankaState, ee_callback)
-  rospy.Subscriber('/franka_state_controller/F_ext', WrenchStamped, force_callback)
+  rospy.Subscriber('franka_state_controller/franka_states', FrankaState, franka_pose_cb)
+  rospy.Subscriber('/franka_state_controller/F_ext', WrenchStamped, franka_force_cb)
+  rospy.Subscriber('cmd_js', Twist, joystick_axes_cb)
   file_path = os.path.join(os.path.dirname(__file__), '../data/franka_state.csv')
   file_out = open(file_path, 'w')
   writer = csv.writer(file_out)
@@ -58,7 +64,6 @@ if __name__ == "__main__":
     data = np.append(data, Fx)
     data = np.append(data, Fy)
     data = np.append(data, Fz)
-    # print('current pose: \n', T_O_ee)
     print('eef wrench x: {:.3f} y: {:.3f} z: {:.3f} \n'.format(Fx, Fy, Fz))
     writer.writerow(data)
     rate.sleep()

@@ -80,58 +80,52 @@ doScan = False         # set to True to enable scanning with active-sensing ee
 # ================================
 
 
-def main():
-  global T_O_ee, T_O_tar, doScan, width, height, ss, pix_tar
-  rospy.init_node('scan_with_active_sensing_ee', anonymous=True)
-  motion = FrankaMotion(depth_compensation=True)
-  rs = GetRealSenseData()
-  cv2.namedWindow('realsense', cv2.WINDOW_AUTOSIZE)
-  rate = rospy.Rate(800)
-  while not rospy.is_shutdown():
-    T_O_ee = motion.T_O_ee
-    key = cv2.waitKey(3)
-    rs.stream_depth2color_aligned()
-    frame2show = rs.color_image
-    if key & 0xFF == ord('q') or key == 27:
-      cv2.destroyAllWindows()
-      break
+rospy.init_node('scan_with_active_sensing_ee', anonymous=True)
+motion = FrankaMotion(depth_compensation=True)
+rs = GetRealSenseData()
+cv2.namedWindow('realsense', cv2.WINDOW_AUTOSIZE)
+rate = rospy.Rate(800)
 
-    # select landing target in camera view
-    elif key == ord('w'):
-      pix_tar[1] = pix_tar[1] - ss if pix_tar[1]-(ss+15) > 0 else pix_tar[1]
-    elif key == ord('a'):
-      pix_tar[0] = pix_tar[0] - ss if pix_tar[0]-(ss+15) > 0 else pix_tar[0]
-    elif key == ord('s'):
-      pix_tar[1] = pix_tar[1] + ss if pix_tar[1]+(ss+15) < height else pix_tar[1]
-    elif key == ord('d'):
-      pix_tar[0] = pix_tar[0] + ss if pix_tar[0]+(ss+15) < width else pix_tar[0]
+while not rospy.is_shutdown():
+  T_O_ee = motion.T_O_ee
+  key = cv2.waitKey(3)
+  rs.stream_depth2color_aligned()
+  frame2show = rs.color_image
+  if key & 0xFF == ord('q') or key == 27:
+    cv2.destroyAllWindows()
+    break
 
-    # landing pose
-    elif key == ord('p'):
-      print('publish target @({:d}, {:d})'.format(pix_tar[0], pix_tar[1]))
-      norm, pos_tar = rs.get_surface_normal(pix_tar)
-      print(pos_tar, norm)
-      # print('normal vector:', norm)
-      T_O_tar = get_pose(pos_tar, norm)
-      print('T_O_tar \n', T_O_tar)
-    elif key == ord('g'):
-      print('go to landing pose')
-      motion.move2pose(T_O_tar)
-      doScan = True
-    elif key == ord('h'):
-      print('go home')
-      doScan = False
-      motion.move2pose()
+  # select landing target in camera view
+  elif key == ord('w'):
+    pix_tar[1] = pix_tar[1] - ss if pix_tar[1]-(ss+15) > 0 else pix_tar[1]
+  elif key == ord('a'):
+    pix_tar[0] = pix_tar[0] - ss if pix_tar[0]-(ss+15) > 0 else pix_tar[0]
+  elif key == ord('s'):
+    pix_tar[1] = pix_tar[1] + ss if pix_tar[1]+(ss+15) < height else pix_tar[1]
+  elif key == ord('d'):
+    pix_tar[0] = pix_tar[0] + ss if pix_tar[0]+(ss+15) < width else pix_tar[0]
 
-    # if doScan:
-    #   motion.scan_w_active_sensing_ee()
-    #   doScan = False
+  # landing pose
+  elif key == ord('p'):
+    print('publish target @({:d}, {:d})'.format(pix_tar[0], pix_tar[1]))
+    norm, pos_tar = rs.get_surface_normal(pix_tar)
+    print('target position', pos_tar, 'normal vector:', norm)
+    T_O_tar = get_pose(pos_tar, norm)
+    print('T_O_tar \n', T_O_tar)
+  elif key == ord('g'):
+    print('go to landing pose')
+    motion.move2pose(T_O_tar)
+    doScan = True
+  elif key == ord('h'):
+    print('go home')
+    doScan = False
+    motion.move2pose()
 
-    frame2show = cv2.rectangle(
-        frame2show, (pix_tar[0]-10, pix_tar[1]-10), (pix_tar[0]+10, pix_tar[1]+10), (30, 90, 30), 2, -1)
-    cv2.imshow('realsense', frame2show)
-    rate.sleep()
+  # if doScan:
+  #   motion.scan_w_active_sensing_ee()
+  #   doScan = False
 
-
-if __name__ == "__main__":
-  main()
+  frame2show = cv2.rectangle(
+      frame2show, (pix_tar[0]-10, pix_tar[1]-10), (pix_tar[0]+10, pix_tar[1]+10), (30, 90, 30), 2, -1)
+  cv2.imshow('realsense', frame2show)
+  rate.sleep()
