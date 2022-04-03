@@ -1,11 +1,12 @@
-%% force control experiments with active-sensing-ee
+%% force control experiment with active-sensing-ee
 clc; clear; close all
 
-% franka_state = csvread('./data/03-21-2022_franka_state_stat.csv');
-% franka_state = csvread('./data/03-21-2022_franka_state_dyna.csv');
-% franka_state = csvread('./data/03-21-2022_franka_state_stat2.csv');
-% franka_state = csvread('./data/03-21-2022_franka_state_dyna2.csv');
-franka_state = csvread('./data/03-31-2022_franka_state{force_test}.csv');
+file_dir = './data/franka_state';
+% franka_state = csvread([dir,'03-21-2022_franka_state_stat.csv']);
+% franka_state = csvread([dir,'03-21-2022_franka_state_dyna.csv']);
+% franka_state = csvread([dir,'03-21-2022_franka_state_stat2.csv']);
+% franka_state = csvread([dir,'03-21-2022_franka_state_dyna2.csv']);
+franka_state = csvread([file_dir,'03-31-2022_franka_state{force_test}.csv']);
 
 %% plot force vs. time
 Fz = franka_state(:,end);
