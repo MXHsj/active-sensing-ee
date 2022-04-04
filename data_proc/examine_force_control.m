@@ -1,7 +1,7 @@
 %% force control experiment with active-sensing-ee
 clc; clear; close all
 
-file_dir = './data/franka_state';
+file_dir = './data/franka_state/';
 % franka_state = csvread([dir,'03-21-2022_franka_state_stat.csv']);
 % franka_state = csvread([dir,'03-21-2022_franka_state_dyna.csv']);
 % franka_state = csvread([dir,'03-21-2022_franka_state_stat2.csv']);
@@ -16,7 +16,7 @@ figure('Position',[1920/4,1080/4,800,400])
 plot((1:numel(Fz))/fps, Fz)
 hold on
 plot((1:numel(Fz))/fps,Fz_desired*ones(numel(Fz),1),'--r','LineWidth',1.5)
-legend('measured','desired');
+legend('measured','desired','Location','southeast');
 axis tight; 
 xlabel('time [sec]'); ylabel('z force [N]')
 
@@ -38,11 +38,12 @@ figure('Position',[1920/3, 1080/3, 800, 400])
 % plot position + force
 scatter3(x,y,z,10,cmap,'filled');
 xlabel('x [mm]'); ylabel('y [mm]'); zlabel('z [mm]');
+axis equal
 colormap(gca, 'jet')
 cb = colorbar();
 cb.Label.String = 'force error [N]';
 % plot approach vector
-isShowVec = true;
+isShowVec = false;
 if isShowVec
     hold on
     interval = 12;
@@ -53,9 +54,9 @@ if isShowVec
             'Color','red','LineWidth',1);
     end
 end
-view(60,30)     % isotropic
 % view(90,0)      % Y-Z
 % view(0, 90)     % X-Y
+view(60,30)     % isotropic
 
 
 

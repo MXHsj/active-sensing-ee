@@ -30,51 +30,51 @@ for i = 1:nimgs
     bscan_cropped = cat(3,bscan_cropped,curr_img);
 end
 
-%% compare CNR
 bscan_manual = bscan_cropped(:,:,1:2:end-1);
 bscan_robot = bscan_cropped(:,:,2:2:end);
+
+%% compare CNR (no need to run every time)
+% manual ROI & background selection
+updateRes = false;
 roi = cell(2,size(bscan_manual,3)); 
 bg = cell(2,size(bscan_manual,3));
-% manual ROI selection
-doCNRComp = true;
-updateRes = false;
-if doCNRComp
-    for i = 1:size(bscan_manual,3)
-        fprintf('annotate manually collected image (%d/%d) \n',i,size(bscan_manual,3))
-        imagesc(bscan_manual(:,:,i)); axis equal tight; colormap gray
-        disp('draw roi'); 
-        roi_v = drawrectangle('label','roi','LineWidth',1.5,'Color','red');
-        input('press enter to continue')
-        disp('draw background')
-        bg_v = drawrectangle('label','bg','LineWidth',1.5,'Color','yellow');
-        input('press enter to continue')
-        roi_x=round(roi_v.Position(1)); bg_x=round(bg_v.Position(1));
-        roi_y=round(roi_v.Position(2)); bg_y=round(bg_v.Position(2));
-        roi_w=round(roi_v.Position(3)); bg_w=round(bg_v.Position(3));
-        roi_h=round(roi_v.Position(4)); bg_h=round(bg_v.Position(4)); 
-        roi{1,i} = bscan_manual(roi_y:roi_y+roi_h, roi_x:roi_x+roi_w,i);
-        bg{1,i} = bscan_manual(bg_y:bg_y+bg_h, bg_x:bg_x+bg_w,i);
-    end
-    for i = 1:size(bscan_robot,3)
-        fprintf('annotate robotically collected image (%d/%d) \n',i,size(bscan_manual,3))
-        imagesc(bscan_robot(:,:,i)); axis equal tight; colormap gray
-        disp('draw roi'); 
-        roi_v = drawrectangle('label','roi','LineWidth',1.5,'Color','red');
-        input('press enter to continue')
-        disp('draw background')
-        bg_v = drawrectangle('label','bg','LineWidth',1.5,'Color','yellow');
-        input('press enter to continue')
-        roi_x=round(roi_v.Position(1)); bg_x=round(bg_v.Position(1));
-        roi_y=round(roi_v.Position(2)); bg_y=round(bg_v.Position(2));
-        roi_w=round(roi_v.Position(3)); bg_w=round(bg_v.Position(3));
-        roi_h=round(roi_v.Position(4)); bg_h=round(bg_v.Position(4)); 
-        roi{2,i} = bscan_robot(roi_y:roi_y+roi_h, roi_x:roi_x+roi_w,i);
-        bg{2,i} = bscan_robot(bg_y:bg_y+bg_h, bg_x:bg_x+bg_w,i);
-    end
-    if updateRes
-        save([file_dir, experiment, 'roi.mat'],'roi');
-        save([file_dir, experiment, 'bg.mat'],'bg')
-    end
+% for manually collected data
+for i = 1:size(bscan_manual,3)
+    fprintf('annotate manually collected image (%d/%d) \n',i,size(bscan_manual,3))
+    imagesc(bscan_manual(:,:,i)); axis equal tight; colormap gray
+    disp('draw roi'); 
+    roi_v = drawrectangle('label','roi','LineWidth',1.5,'Color','red');
+    input('press enter to continue')
+    disp('draw background')
+    bg_v = drawrectangle('label','bg','LineWidth',1.5,'Color','yellow');
+    input('press enter to continue')
+    roi_x=round(roi_v.Position(1)); bg_x=round(bg_v.Position(1));
+    roi_y=round(roi_v.Position(2)); bg_y=round(bg_v.Position(2));
+    roi_w=round(roi_v.Position(3)); bg_w=round(bg_v.Position(3));
+    roi_h=round(roi_v.Position(4)); bg_h=round(bg_v.Position(4)); 
+    roi{1,i} = bscan_manual(roi_y:roi_y+roi_h, roi_x:roi_x+roi_w,i);
+    bg{1,i} = bscan_manual(bg_y:bg_y+bg_h, bg_x:bg_x+bg_w,i);
+end
+% for robotically collected data
+for i = 1:size(bscan_robot,3)
+    fprintf('annotate robotically collected image (%d/%d) \n',i,size(bscan_manual,3))
+    imagesc(bscan_robot(:,:,i)); axis equal tight; colormap gray
+    disp('draw roi'); 
+    roi_v = drawrectangle('label','roi','LineWidth',1.5,'Color','red');
+    input('press enter to continue')
+    disp('draw background')
+    bg_v = drawrectangle('label','bg','LineWidth',1.5,'Color','yellow');
+    input('press enter to continue')
+    roi_x=round(roi_v.Position(1)); bg_x=round(bg_v.Position(1));
+    roi_y=round(roi_v.Position(2)); bg_y=round(bg_v.Position(2));
+    roi_w=round(roi_v.Position(3)); bg_w=round(bg_v.Position(3));
+    roi_h=round(roi_v.Position(4)); bg_h=round(bg_v.Position(4)); 
+    roi{2,i} = bscan_robot(roi_y:roi_y+roi_h, roi_x:roi_x+roi_w,i);
+    bg{2,i} = bscan_robot(bg_y:bg_y+bg_h, bg_x:bg_x+bg_w,i);
+end
+if updateRes
+    save([file_dir, experiment, 'roi.mat'],'roi');
+    save([file_dir, experiment, 'bg.mat'],'bg')
 end
 
 %% calculate CNR
@@ -96,7 +96,7 @@ hold on
 legend('manual','robot','Location','northwest')
 
 %% show example images
-frm_id = 7;
+frm_id = 3;
 figure('Position',[1920/4, 1080/3, 1200, 400])
 
 subplot(1,2,1)
