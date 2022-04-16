@@ -1,6 +1,7 @@
 %% US image quality experiment with active-sensing-ee
 clc; clear; close all
 
+%% load data
 file_dir = './data/clarius/';
 experiment = 'Lung_Exam-01-Apr-2022/';
 imgs = dir([file_dir, experiment, '*.jpeg']);
@@ -15,7 +16,7 @@ for i=1:1:nimgs
    bscan(:,:,i) = rgb2gray(curr_img);
 end
 
-%% crop image
+% crop image
 bscan_cropped = [];
 % == crop frame
 frm_top = 120; frm_bot = height - 120;
@@ -35,7 +36,7 @@ bscan_robot = bscan_cropped(:,:,2:2:end);
 
 %% compare CNR (no need to run every time)
 % manual ROI & background selection
-updateRes = false;
+updateResult = false;
 roi = cell(2,size(bscan_manual,3)); 
 bg = cell(2,size(bscan_manual,3));
 % for manually collected data
@@ -72,17 +73,17 @@ for i = 1:size(bscan_robot,3)
     roi{2,i} = bscan_robot(roi_y:roi_y+roi_h, roi_x:roi_x+roi_w,i);
     bg{2,i} = bscan_robot(bg_y:bg_y+bg_h, bg_x:bg_x+bg_w,i);
 end
-if updateRes
+if updateResult
     save([file_dir, experiment, 'roi.mat'],'roi');
     save([file_dir, experiment, 'bg.mat'],'bg')
 end
 
 %% calculate CNR
-CNR = zeros(2,size(bscan_manual,3));
-for i = 1:size(bscan_manual,3)
-    CNR(1, i) = abs(mean(roi{1,i},'all')-mean(bg{1,i},'all'))/ ...
+CNR = zeros(2,length(roi));
+for i = 1:length(roi)
+    CNR(1, i) = abs(mean(roi{1,i},'all')-mean(bg{1,i},'all'))/ ...      % manual
         sqrt(var(double(roi{1,i}),1,'all')+var(double(bg{1,i}),1,'all'));
-    CNR(2, i) = abs(mean(roi{2,i},'all')-mean(bg{2,i},'all'))/ ...
+    CNR(2, i) = abs(mean(roi{2,i},'all')-mean(bg{2,i},'all'))/ ...      % robot
         sqrt(var(double(roi{2,i}),1,'all')+var(double(bg{2,i}),1,'all'));
 end
 
@@ -96,7 +97,7 @@ hold on
 legend('manual','robot','Location','northwest')
 
 %% show example images
-frm_id = 3;
+frm_id = 1;
 figure('Position',[1920/4, 1080/3, 1200, 400])
 
 subplot(1,2,1)
@@ -110,4 +111,33 @@ imagesc(bscan_robot(:,:,frm_id));
 axis equal tight off
 colormap gray
 title(['robot #',num2str(frm_id)])
+ 
+%% compare CNR difference
+% load saved CNR data!
+    
+pl_CNR_diff = pl_CNR(2,:) - pl_CNR(1,:);    % robot - manual
+rs_CNR_diff = rs_CNR(2,:) - rs_CNR(1,:);
 
+CNR_diff = [pl_CNR_diff; rs_CNR_diff];
+
+% use 7 regions
+CNR_diff(:,4:5) = [];   
+CNR_diff(:,5:end) = fliplr(CNR_diff(:,5:end));
+
+figure('Position',[1920/3, 1080/3, 500, 300])
+patch([0, 0, length(CNR_diff)+1, length(CNR_diff)+1], ...
+      [0, 2*max(CNR_diff(:)), 2*max(CNR_diff(:)), 0], ...
+      'green','FaceAlpha',.1,'EdgeColor','none')
+hold on;
+patch([0, 0, length(CNR_diff)+1, length(CNR_diff)+1], ...
+      [0, 2*min(CNR_diff(:)), 2*min(CNR_diff(:)), 0], ...
+      'red','FaceAlpha',.1,'EdgeColor','none')
+b = bar(CNR_diff','BarWidth',1.0);
+b(1).FaceColor = '#5b7888';
+b(2).FaceColor = '#a6c9d7';
+xlabel('acquisition points'); ylabel('CNR difference (a.u.)')
+legend(b,'lung plueral line','rib shadow','Location','southwest')
+ax = gca; ax.YGrid = 'on';
+ylim([1.1*min(CNR_diff(:)) 1.1*max(CNR_diff(:))]); 
+% yticks([-0.5 0 0.55])
+box on; ax = gca(); ax.LineWidth = 1;
