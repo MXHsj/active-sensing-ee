@@ -11,16 +11,16 @@ franka_state = csvread([file_dir,'03-31-2022_franka_state{force_test}.csv']);
 %% plot force vs. time
 Fz = franka_state(:,end);
 Fz_desired = 3.5;
-fps = 30; ts = 120; tf = numel(Fz);
+fps = 30; ts = 106; tf = numel(Fz);
 figure('Position',[1920/4,1080/4,900,300])
 plot((ts:tf)/fps, Fz(ts:tf), 'k', 'LineWidth', 1)
 hold on
-plot((ts:tf)/fps,Fz_desired*ones(tf-ts+1,1),'--r','LineWidth',1.5)
-legend('measured','desired','Location','southeast');
+plot((ts:tf)/fps,Fz_desired*ones(tf-ts+1,1),'--r','LineWidth',2.0)
+% legend('measured','desired','Location','southeast');
 axis tight; 
-xlabel('time [sec]'); ylabel('z force [N]')
+xlabel('time [sec]'); ylabel('z force [N]'); ylim([0 5])
 fprintf('mean force: %f [N], std: %f\n', mean(Fz), std(Fz));
-ax = gca(); ax.LineWidth = 1.5;
+ax = gca(); ax.LineWidth = 1.5; ax.YGrid = 'on';
 
 %% plot force vs. robot pose
 ts = 150;                   % start time

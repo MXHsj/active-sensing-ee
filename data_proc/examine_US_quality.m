@@ -139,5 +139,5 @@ xlabel('acquisition points'); ylabel('CNR difference (a.u.)')
 legend(b,'lung plueral line','rib shadow','Location','southwest')
 ax = gca; ax.YGrid = 'on';
 ylim([1.1*min(CNR_diff(:)) 1.1*max(CNR_diff(:))]); 
-% yticks([-0.5 0 0.55])
+xticklabels({'', '1', '2','3','4','5','6','7',''})
 box on; ax = gca(); ax.LineWidth = 1;
