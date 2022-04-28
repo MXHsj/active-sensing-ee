@@ -257,7 +257,5 @@ class FrankaMotion():
 if __name__ == "__main__":
   rospy.init_node('franka_motion', anonymous=True)
   motion = FrankaMotion(depth_compensation=True)
-  doScan = True
   # motion.move2pose()
-  if doScan:
-    motion.scan_w_active_sensing_ee()
+  motion.scan_w_active_sensing_ee()

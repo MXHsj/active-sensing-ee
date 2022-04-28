@@ -1,7 +1,7 @@
 # Active-sensing end-effector (A-SEE)
 
 ## Description
-ROS package for Franka control using A-SEE
+ROS package for Franka ultrasound scanning using A-SEE
 
 Franka controller: ```rv_panda```
 
