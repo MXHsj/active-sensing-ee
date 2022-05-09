@@ -43,7 +43,7 @@ def get_pose(P0, Vz):
                           [cam_tar[2], cam_tar[5], cam_tar[8], cam_tar[11]],
                           [0.0, 0.0, 0.0, 1.0]])
     # entry pose w.r.t base
-    dist_coeff = 0.1      # 0.075
+    dist_coeff = 0.15      # 0.075
     Pz = np.subtract(P0, [dist_coeff*Vzi for Vzi in Vz])
     T_cam_tar[0:3, 3] = Pz
     T_O_tar = convert2base(T_cam_tar)
@@ -54,9 +54,9 @@ def get_pose(P0, Vz):
 
 # ========== parameters ==========
 # hand-eye calibration for Clarius ee
-T_ee_cam = np.array([[0.0, -math.cos(math.pi/8), math.sin(math.pi/8), 0.0910],
-                     [1.0, 0.0, 0.0, -0.0291],
-                     [0.0, math.sin(math.pi/8), math.cos(math.pi/8), -0.2568],
+T_ee_cam = np.array([[0.0, -math.cos(math.pi/8), math.sin(math.pi/8), 0.1300],  # 0.0910
+                     [1.0, 0.0, 0.0, -0.060],  # -0.0291 -0.060
+                     [0.0, math.sin(math.pi/8), math.cos(math.pi/8), -0.2568],  # -0.2568
                      [0.0, 0.0, 0.0, 1.0]])
 # T_ee_cam = np.array([[0.0, -0.9272, 0.3746, 0.0886],
 #                      [1.0, 0.0, 0.0, -0.0175],
@@ -76,7 +76,7 @@ width = 640            # rs frame width
 height = 480           # rs frame height
 ss = 5                 # step size moving target
 pix_tar = [320, 240]   # default target in pixel
-doScan = False         # set to True to enable scanning with active-sensing ee
+doScan = False         # initialize do scan flag
 # ================================
 
 
@@ -121,9 +121,9 @@ while not rospy.is_shutdown():
     doScan = False
     motion.move2pose()
 
-  # if doScan:
-  #   motion.scan_w_active_sensing_ee()
-  #   doScan = False
+  if doScan:
+    motion.scan_w_active_sensing_ee()
+    doScan = False
 
   frame2show = cv2.rectangle(
       frame2show, (pix_tar[0]-10, pix_tar[1]-10), (pix_tar[0]+10, pix_tar[1]+10), (30, 90, 30), 2, -1)

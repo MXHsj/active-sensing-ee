@@ -70,15 +70,15 @@ class FrankaMotion():
   Fz_queue = []           # store force along z for moving averaging
   Fz_window = 30          # moving average window on z-axis force
   max_range = 200.0       # maximum sensing range
-  desired_yaw = -1.57     # default eef yaw
   pub_rate = 900          # eef velocity publishing rate
+  desired_yaw = -1.57     # default eef yaw
   desried_force = 3.5     # desired contact force N
   enDepthComp = True      # flag to enable depth compensation
   endControl = False      # flag to end scanning
 
   def __init__(self, depth_compensation=True):
     rospy.Subscriber('cmd_js', Twist, self.joystick_axes_cb)
-    rospy.Subscriber('isContact', Bool, self.joystick_button_cb)
+    rospy.Subscriber('contact_mode/isContact', Bool, self.joystick_button_cb)
     rospy.Subscriber('VL53L0X/normal', Float64MultiArray, self.VL53L0X_norm_cb)
     rospy.Subscriber('VL53L0X/distance', Float64MultiArray, self.VL53L0X_dist_cb)
     rospy.Subscriber('franka_state_controller/franka_states', FrankaState, self.franka_pose_cb)
@@ -105,8 +105,8 @@ class FrankaMotion():
     target.pose.position.x = T_O_EE_d[0, -1]
     target.pose.position.y = T_O_EE_d[1, -1]
     target.pose.position.z = T_O_EE_d[2, -1]
-    target.pose.orientation.x = -0.7071
-    target.pose.orientation.y = 0.7071
+    target.pose.orientation.x = 0.7071
+    target.pose.orientation.y = -0.7071
     target.pose.orientation.z = 0.00
     target.pose.orientation.w = 0.00
     # target.pose.orientation.x = quat[0]
@@ -224,7 +224,8 @@ class FrankaMotion():
   def joystick_axes_cb(self, msg):
     self.vel_msg_tele.twist.linear.x = msg.linear.x
     self.vel_msg_tele.twist.linear.y = msg.linear.y
-    self.desired_yaw += 0.03*msg.linear.z
+    # TODO: debug change of desired_yaw when running scan_with_active_ee.py
+    # self.desired_yaw += 0.03*msg.linear.z
 
   def joystick_button_cb(self, msg):
     self.endControl = msg.data

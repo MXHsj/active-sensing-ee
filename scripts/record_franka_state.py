@@ -6,6 +6,10 @@ import os
 import csv
 import rospy
 import numpy as np
+from cv2 import cv2
+from datetime import date
+from cv_bridge import CvBridge
+from sensor_msgs.msg import Image
 from franka_msgs.msg import FrankaState
 from geometry_msgs.msg import Twist
 from geometry_msgs.msg import WrenchStamped
@@ -23,9 +27,14 @@ def msg2matrix(raw_msg):
   return T
 
 
+def clarius_us_cb(msg):
+  global US_Bmode
+  US_Bmode = CvBridge().imgmsg_to_cv2(msg, desired_encoding="passthrough")
+
+
 def franka_pose_cb(msg):
-  EE_pos = msg.O_T_EE_d  # inv 4x4 matrix
   global T_O_ee
+  EE_pos = msg.O_T_EE_d  # inv 4x4 matrix
   T_O_ee = np.array([EE_pos[0:4], EE_pos[4:8], EE_pos[8:12], EE_pos[12:16]]).transpose()
 
 
@@ -42,7 +51,9 @@ def joystick_axes_cb(msg):
 
 
 if __name__ == "__main__":
-  freq = 30         # loop rate
+  freq = 5         # loop rate
+  isRecUS = True    # flag to enable recording US images
+  US_Bmode = None
   T_O_ee = None
   Fx = None
   Fy = None
@@ -51,21 +62,41 @@ if __name__ == "__main__":
   rospy.Subscriber('franka_state_controller/franka_states', FrankaState, franka_pose_cb)
   rospy.Subscriber('/franka_state_controller/F_ext', WrenchStamped, franka_force_cb)
   rospy.Subscriber('cmd_js', Twist, joystick_axes_cb)
-  file_path = os.path.join(os.path.dirname(__file__), '../data/franka_state.csv')
-  file_out = open(file_path, 'w')
-  writer = csv.writer(file_out)
+  rospy.Subscriber('/Clarius/US', Image, clarius_us_cb)
+  robot_logger_path = os.path.join(os.path.dirname(__file__), '../data/franka_state/franka_state.csv')
+  image_logger_path = os.path.join(os.path.dirname(__file__), '../data/clarius/lung-{}/'.format(date.today()))
+  if not os.path.exists(image_logger_path):
+    os.makedirs(image_logger_path)
+  robot_logger = open(robot_logger_path, 'w')
+  writer = csv.writer(robot_logger)
   rate = rospy.Rate(freq)
+
+  # wait for robot state to be received
   print('connecting to robot ...')
   while not rospy.is_shutdown():
-    if T_O_ee is not None and Fx is not None:
-      break
+    if isRecUS:
+      if T_O_ee is not None and Fx is not None and US_Bmode is not None:
+        break
+    else:
+      if T_O_ee is not None and Fx is not None:
+        break
+
+  # record data
+  counter = 0
   while not rospy.is_shutdown():
     data = T_O_ee.flatten()
     data = np.append(data, Fx)
     data = np.append(data, Fy)
     data = np.append(data, Fz)
-    print('eef wrench x: {:.3f} y: {:.3f} z: {:.3f} \n'.format(Fx, Fy, Fz))
+    print('i: {} ee force x: {:.3f} y: {:.3f} z: {:.3f} \n'.format(counter, Fx, Fy, Fz))
     writer.writerow(data)
+    if isRecUS:
+      US_Bmode_gray = cv2.cvtColor(US_Bmode, cv2.COLOR_BGR2GRAY)
+      cv2.imwrite(os.path.join(image_logger_path, 'US_{}.jpg'.format(counter)), US_Bmode_gray)
+    counter += 1
     rate.sleep()
-  print('robot pose written to file ', file_path)
-  file_out.close()
+
+  print('robot pose written to file ', robot_logger_path)
+  if isRecUS:
+    print('US images written to ', image_logger_path)
+  robot_logger.close()
