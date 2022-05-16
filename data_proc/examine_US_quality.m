@@ -34,7 +34,7 @@ end
 bscan_manual = bscan_cropped(:,:,1:2:end-1);
 bscan_robot = bscan_cropped(:,:,2:2:end);
 
-%% compare CNR (no need to run every time)
+%% manual selection of ROI and BG to calculate CNR (only run once for each dataset)
 % manual ROI & background selection
 updateResult = false;
 roi = cell(2,size(bscan_manual,3)); 
@@ -141,3 +141,28 @@ ax = gca; ax.YGrid = 'on';
 ylim([1.1*min(CNR_diff(:)) 1.1*max(CNR_diff(:))]); 
 xticklabels({'', '1', '2','3','4','5','6','7',''})
 box on; ax = gca(); ax.LineWidth = 1;
+
+%% statistical plot of actual CNR
+pl_CNR_trimmed = pl_CNR;
+rs_CNR_trimmed = rs_CNR;
+
+pl_CNR_trimmed(:,4:5) = []; pl_CNR_trimmed(:,5:end) = fliplr(pl_CNR_trimmed(:,5:end));
+rs_CNR_trimmed(:,4:5) = []; rs_CNR_trimmed(:,5:end) = fliplr(rs_CNR_trimmed(:,5:end));
+
+figure('Position',[1920/3, 1080/3, 580, 350])
+layout = tiledlayout(1,2);
+ylabel(layout,'CNR (a.u.)');
+
+ax1 = nexttile;
+boxchart(pl_CNR_trimmed','BoxFaceColor','#77AC30'); box on; hold on; ylim([0.5 2.0])
+legend('lung plueral line')
+title('lung plueral line'); xticklabels({'manual','A-SEE-RUSS'})
+plot(pl_CNR_trimmed,'.','MarkerSize',12,'Color',[48,55,61]./255)
+ax1.YGrid = 'on'; ax1.LineWidth = 1.0;
+
+ax2 = nexttile;
+boxchart(rs_CNR_trimmed','BoxFaceColor','#77AC30'); box on; hold on; ylim([0.5 2.0])
+legend('rib shadow')
+title('rib shadow'); xticklabels({'manual','A-SEE-RUSS'})
+plot(rs_CNR_trimmed,'.','MarkerSize',12,'Color',[48,55,61]./255)
+ax2.YGrid = 'on'; ax2.LineWidth = 1.0;
